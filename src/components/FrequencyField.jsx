@@ -19,30 +19,8 @@ const freqBands = [
   [10000, 12500], [12500, 16000], [16000, 18000], [18000, 19500], [19500, 20000]
 ]
 
-export default function FrequencyField({ audioRef }) {
+export default function FrequencyField({ analyserRef, dataArrayRef }) {
   const lines = useRef([])
-  const analyserRef = useRef()
-  const dataArrayRef = useRef()
-
-  useEffect(() => {
-    if (!audioRef.current) return
-
-    const ctx = new AudioContext()
-    const src = ctx.createMediaElementSource(audioRef.current)
-    const analyser = ctx.createAnalyser()
-    analyser.fftSize = 2048
-    src.connect(analyser)
-    analyser.connect(ctx.destination)
-
-    const data = new Uint8Array(analyser.frequencyBinCount)
-    analyserRef.current = analyser
-    dataArrayRef.current = data
-
-    return () => {
-      src.disconnect()
-      analyser.disconnect()
-    }
-  }, [audioRef])
 
   const spacing = 0.55
   const lineMeshes = useMemo(() => {
@@ -60,7 +38,7 @@ export default function FrequencyField({ audioRef }) {
 
       const material = new LineMaterial({
         color: 0x000000,
-        linewidth: 1.6, // 🔼 aumentato
+        linewidth: 1.6,
         transparent: true,
         opacity: 1.0,
         depthTest: false
@@ -95,9 +73,8 @@ export default function FrequencyField({ audioRef }) {
       const highBin = freqToBin(high)
       const bandData = data.slice(lowBin, highBin + 1)
       let bandValue = bandData.reduce((sum, v) => sum + v, 0) / bandData.length / 255
+      bandValue = Math.pow(bandValue, 0.6)
 
-      // 🎯 CURVA LOGARITMICA POTENZIATA
-      bandValue = Math.pow(bandValue, 0.6) // più sensibile alle frequenze basse
       const minLineWidth = 1.6
       const maxLineWidth = 19.0
       const curvedWidth = minLineWidth + bandValue * (maxLineWidth - minLineWidth)

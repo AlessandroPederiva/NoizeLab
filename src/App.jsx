@@ -1,18 +1,39 @@
-import React, { useState, useRef } from 'react'
-import Visualizer from './components/Visualizer'
+import React, { useState, useRef, useEffect } from 'react'
+import VisualizerSwitcher from './components/VisualizerSwitcher'
 
 function App() {
-  const [audioFile, setAudioFile] = useState(null)
   const [audioUrl, setAudioUrl] = useState(null)
   const [isPlaying, setIsPlaying] = useState(false)
+  const [visualMode, setVisualMode] = useState('frequency')
   const audioRef = useRef(null)
+  const analyserRef = useRef(null)
+  const dataArrayRef = useRef(null)
+
+  useEffect(() => {
+    if (!audioRef.current) return
+
+    const ctx = new AudioContext()
+    const src = ctx.createMediaElementSource(audioRef.current)
+    const analyser = ctx.createAnalyser()
+    analyser.fftSize = 2048
+    src.connect(analyser)
+    analyser.connect(ctx.destination)
+
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    analyserRef.current = analyser
+    dataArrayRef.current = data
+
+    return () => {
+      src.disconnect()
+      analyser.disconnect()
+    }
+  }, [audioUrl])
 
   const handleAudioUpload = (event) => {
     const file = event.target.files[0]
     if (file) {
       const url = URL.createObjectURL(file)
       setAudioUrl(url)
-      setAudioFile(file)
       setIsPlaying(false)
       if (audioRef.current) {
         audioRef.current.pause()
@@ -23,11 +44,7 @@ function App() {
 
   const togglePlay = () => {
     if (!audioRef.current) return
-    if (isPlaying) {
-      audioRef.current.pause()
-    } else {
-      audioRef.current.play()
-    }
+    isPlaying ? audioRef.current.pause() : audioRef.current.play()
     setIsPlaying(!isPlaying)
   }
 
@@ -68,16 +85,28 @@ function App() {
             left: '1rem',
             color: 'white',
             display: 'flex',
-            gap: '1rem'
+            flexDirection: 'column',
+            gap: '0.5rem'
           }}>
-            <button onClick={togglePlay}>
-              {isPlaying ? '⏸ Pausa' : '▶️ Play'}
-            </button>
-            <button onClick={() => skip(-5)}>⏪ -5s</button>
-            <button onClick={() => skip(5)}>⏩ +5s</button>
-            <button onClick={restart}>🔁 Restart</button>
+            <div style={{ display: 'flex', gap: '1rem' }}>
+              <button onClick={togglePlay}>
+                {isPlaying ? '⏸ Pausa' : '▶️ Play'}
+              </button>
+              <button onClick={() => skip(-5)}>⏪ -5s</button>
+              <button onClick={() => skip(5)}>⏩ +5s</button>
+              <button onClick={restart}>🔁 Restart</button>
+            </div>
+            <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <button onClick={() => setVisualMode('frequency')}>🎛 Frequency</button>
+              <button onClick={() => setVisualMode('particles')}>💥 Particles</button>
+            </div>
           </div>
-          <Visualizer audioRef={audioRef} />
+
+          <VisualizerSwitcher
+            mode={visualMode}
+            analyserRef={analyserRef}
+            dataArrayRef={dataArrayRef}
+          />
         </>
       )}
     </div>
