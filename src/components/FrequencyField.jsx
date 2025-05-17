@@ -2,8 +2,22 @@ import React, { useRef, useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
-const LINE_COUNT = 16
+const LINE_COUNT = 32
 const POINTS_PER_LINE = 48
+const startY = 4
+const sampleRate = 44100
+
+function freqToBin(freq, fftSize = 2048, sampleRate = 44100) {
+  return Math.floor((freq / sampleRate) * fftSize)
+}
+
+const freqBands = [
+  [20, 25], [25, 31], [31, 39], [39, 50], [50, 63], [63, 78], [78, 100], [100, 125],
+  [125, 157], [157, 200], [200, 250], [250, 315], [315, 400], [400, 500], [500, 630], [630, 800],
+  [800, 1000], [1000, 1250], [1250, 1600], [1600, 2000], [2000, 2500], [2500, 3150],
+  [3150, 4000], [4000, 5000], [5000, 6300], [6300, 8000], [8000, 10000],
+  [10000, 12500], [12500, 16000], [16000, 18000], [18000, 19500], [19500, 20000]
+]
 
 export default function FrequencyField({ audioRef }) {
   const lines = useRef([])
@@ -16,7 +30,7 @@ export default function FrequencyField({ audioRef }) {
     const ctx = new AudioContext()
     const src = ctx.createMediaElementSource(audioRef.current)
     const analyser = ctx.createAnalyser()
-    analyser.fftSize = 512 // alta risoluzione
+    analyser.fftSize = 2048
     src.connect(analyser)
     analyser.connect(ctx.destination)
 
@@ -30,20 +44,22 @@ export default function FrequencyField({ audioRef }) {
     }
   }, [audioRef])
 
-  const spacing = 0.8
+  const spacing = 0.55
   const lineMeshes = useMemo(() => {
     const group = []
     for (let i = 0; i < LINE_COUNT; i++) {
       const geometry = new THREE.BufferGeometry()
       const positions = new Float32Array(POINTS_PER_LINE * 3)
+
       for (let j = 0; j < POINTS_PER_LINE; j++) {
-        const y = (j / (POINTS_PER_LINE - 1)) * 8 - 4
-        positions[j * 3] = 0
+        const y = startY - (j / (POINTS_PER_LINE - 1)) * 8
+        positions[j * 3 + 0] = 0
         positions[j * 3 + 1] = y
         positions[j * 3 + 2] = 0
       }
+
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-      const material = new THREE.LineBasicMaterial({ color: 'white', transparent: true, opacity: 0.8 })
+      const material = new THREE.LineBasicMaterial({ color: 'black', transparent: true, opacity: 0.8 })
       const line = new THREE.Line(geometry, material)
       line.position.x = (i - LINE_COUNT / 2) * spacing
       group.push(line)
@@ -56,58 +72,52 @@ export default function FrequencyField({ audioRef }) {
   }, [lineMeshes])
 
   const topLine = useRef()
-  const bottomLine = useRef()
 
   useFrame(() => {
     if (!analyserRef.current || !dataArrayRef.current) return
     analyserRef.current.getByteFrequencyData(dataArrayRef.current)
     const data = dataArrayRef.current
 
-    const getLogIndex = (i) => {
-      const logIndex = Math.floor(
-        Math.pow(i / LINE_COUNT, 2) * data.length
-      )
-      return Math.min(data.length - 1, Math.max(0, logIndex))
-    }
-
     const topPositions = new Float32Array(LINE_COUNT * 3)
-    const bottomPositions = new Float32Array(LINE_COUNT * 3)
 
     for (let i = 0; i < LINE_COUNT; i++) {
-      const bandIndex = getLogIndex(i)
-      const band = data[bandIndex] / 255
+      const [low, high] = freqBands[i]
+      const lowBin = freqToBin(low)
+      const highBin = freqToBin(high)
+
+      const bandData = data.slice(lowBin, highBin + 1)
+      const bandValue = bandData.reduce((sum, v) => sum + v, 0) / bandData.length / 255
+
       const line = lines.current[i]
       const pos = line.geometry.attributes.position.array
+      const x = (i - LINE_COUNT / 2) * spacing
 
-      for (let j = 0; j < POINTS_PER_LINE; j++) {
-        const y = (j / (POINTS_PER_LINE - 1)) * 8 - 4
-        const movement = band * 0.8
+      // Punto superiore statico
+      pos[0] = 0
+      pos[1] = startY
+      pos[2] = 0
 
-        pos[j * 3] = movement * Math.sin(j * 0.2 + bandIndex * 0.1)
+      topPositions[i * 3 + 0] = x
+      topPositions[i * 3 + 1] = startY
+      topPositions[i * 3 + 2] = 0
+
+      for (let j = 1; j < POINTS_PER_LINE; j++) {
+        const y = startY - (j / (POINTS_PER_LINE - 1)) * 8
+        const strength = j / (POINTS_PER_LINE - 1)
+        const moveX = bandValue * 0.6 * strength * Math.sin(j * 0.3 + i * 0.05)
+        const moveZ = bandValue * 0.6 * strength * Math.cos(j * 0.25 + i * 0.07)
+
+        pos[j * 3 + 0] = moveX
         pos[j * 3 + 1] = y
-        pos[j * 3 + 2] = movement * Math.cos(j * 0.15 + bandIndex * 0.05)
+        pos[j * 3 + 2] = moveZ
       }
 
       line.geometry.attributes.position.needsUpdate = true
-
-      // Top and bottom connectors
-      const x = (i - LINE_COUNT / 2) * spacing
-      topPositions[i * 3] = x + pos[(POINTS_PER_LINE - 1) * 3]
-      topPositions[i * 3 + 1] = 4
-      topPositions[i * 3 + 2] = pos[(POINTS_PER_LINE - 1) * 3 + 2]
-
-      bottomPositions[i * 3] = x + pos[0]
-      bottomPositions[i * 3 + 1] = -4
-      bottomPositions[i * 3 + 2] = pos[2]
     }
 
     topLine.current.geometry.setAttribute(
       'position',
       new THREE.BufferAttribute(topPositions, 3)
-    )
-    bottomLine.current.geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(bottomPositions, 3)
     )
   })
 
@@ -118,11 +128,7 @@ export default function FrequencyField({ audioRef }) {
       ))}
       <line ref={topLine}>
         <bufferGeometry />
-        <lineBasicMaterial color="white" transparent opacity={0.3} />
-      </line>
-      <line ref={bottomLine}>
-        <bufferGeometry />
-        <lineBasicMaterial color="white" transparent opacity={0.3} />
+        <lineBasicMaterial color="black" transparent opacity={0.4} />
       </line>
     </group>
   )

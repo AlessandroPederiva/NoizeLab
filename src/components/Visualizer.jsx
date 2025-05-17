@@ -5,12 +5,11 @@ import FrequencyField from './FrequencyField'
 
 export default function Visualizer({ audioRef }) {
   return (
-    <Canvas camera={{ position: [0, 2, 10], fov: 60 }}>
-      <color attach="background" args={['#000010']} />
+    <Canvas camera={{ position: [0, 0, 15], fov: 50 }}>
+      <color attach="background" args={['white']} />
       <ambientLight intensity={0.5} />
-      <pointLight position={[5, 5, 5]} intensity={2} />
       <FrequencyField audioRef={audioRef} />
-      <OrbitControls autoRotate autoRotateSpeed={0.2} enableZoom={false} />
+      <OrbitControls enableZoom={true} enableRotate={false} autoRotate={false} />
     </Canvas>
   )
 }
