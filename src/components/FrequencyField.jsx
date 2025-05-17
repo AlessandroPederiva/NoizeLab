@@ -1,11 +1,11 @@
 import React, { useRef, useEffect, useMemo } from 'react'
 import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
+import { Line2, LineMaterial, LineGeometry } from '../utils/LineMaterialUtils'
 
 const LINE_COUNT = 32
 const POINTS_PER_LINE = 48
 const startY = 4
-const sampleRate = 44100
 
 function freqToBin(freq, fftSize = 2048, sampleRate = 44100) {
   return Math.floor((freq / sampleRate) * fftSize)
@@ -47,23 +47,36 @@ export default function FrequencyField({ audioRef }) {
   const spacing = 0.55
   const lineMeshes = useMemo(() => {
     const group = []
-    for (let i = 0; i < LINE_COUNT; i++) {
-      const geometry = new THREE.BufferGeometry()
-      const positions = new Float32Array(POINTS_PER_LINE * 3)
 
+    for (let i = 0; i < LINE_COUNT; i++) {
+      const positions = []
       for (let j = 0; j < POINTS_PER_LINE; j++) {
         const y = startY - (j / (POINTS_PER_LINE - 1)) * 8
-        positions[j * 3 + 0] = 0
-        positions[j * 3 + 1] = y
-        positions[j * 3 + 2] = 0
+        positions.push(0, y, 0)
       }
 
-      geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-      const material = new THREE.LineBasicMaterial({ color: 'black', transparent: true, opacity: 0.8 })
-      const line = new THREE.Line(geometry, material)
+      const geometry = new LineGeometry()
+      geometry.setPositions(positions)
+
+      const material = new LineMaterial({
+        color: 0x000000,
+        linewidth: 1.6, // 🔼 aumentato
+        transparent: true,
+        opacity: 1.0,
+        depthTest: false
+      })
+
+      material.resolution.set(window.innerWidth, window.innerHeight)
+      window.addEventListener('resize', () => {
+        material.resolution.set(window.innerWidth, window.innerHeight)
+      })
+
+      const line = new Line2(geometry, material)
       line.position.x = (i - LINE_COUNT / 2) * spacing
+      line.computeLineDistances()
       group.push(line)
     }
+
     return group
   }, [])
 
@@ -71,54 +84,39 @@ export default function FrequencyField({ audioRef }) {
     lines.current = lineMeshes
   }, [lineMeshes])
 
-  const topLine = useRef()
-
   useFrame(() => {
     if (!analyserRef.current || !dataArrayRef.current) return
     analyserRef.current.getByteFrequencyData(dataArrayRef.current)
     const data = dataArrayRef.current
 
-    const topPositions = new Float32Array(LINE_COUNT * 3)
-
-    for (let i = 0; i < LINE_COUNT; i++) {
+    lines.current.forEach((line, i) => {
       const [low, high] = freqBands[i]
       const lowBin = freqToBin(low)
       const highBin = freqToBin(high)
-
       const bandData = data.slice(lowBin, highBin + 1)
-      const bandValue = bandData.reduce((sum, v) => sum + v, 0) / bandData.length / 255
+      let bandValue = bandData.reduce((sum, v) => sum + v, 0) / bandData.length / 255
 
-      const line = lines.current[i]
-      const pos = line.geometry.attributes.position.array
-      const x = (i - LINE_COUNT / 2) * spacing
+      // 🎯 CURVA LOGARITMICA POTENZIATA
+      bandValue = Math.pow(bandValue, 0.6) // più sensibile alle frequenze basse
+      const minLineWidth = 1.6
+      const maxLineWidth = 19.0
+      const curvedWidth = minLineWidth + bandValue * (maxLineWidth - minLineWidth)
 
-      // Punto superiore statico
-      pos[0] = 0
-      pos[1] = startY
-      pos[2] = 0
+      line.material.linewidth = curvedWidth
+      line.material.resolution.set(window.innerWidth, window.innerHeight)
 
-      topPositions[i * 3 + 0] = x
-      topPositions[i * 3 + 1] = startY
-      topPositions[i * 3 + 2] = 0
-
-      for (let j = 1; j < POINTS_PER_LINE; j++) {
+      const positions = []
+      for (let j = 0; j < POINTS_PER_LINE; j++) {
         const y = startY - (j / (POINTS_PER_LINE - 1)) * 8
         const strength = j / (POINTS_PER_LINE - 1)
         const moveX = bandValue * 0.6 * strength * Math.sin(j * 0.3 + i * 0.05)
         const moveZ = bandValue * 0.6 * strength * Math.cos(j * 0.25 + i * 0.07)
-
-        pos[j * 3 + 0] = moveX
-        pos[j * 3 + 1] = y
-        pos[j * 3 + 2] = moveZ
+        positions.push(moveX, y, moveZ)
       }
 
+      line.geometry.setPositions(positions)
       line.geometry.attributes.position.needsUpdate = true
-    }
-
-    topLine.current.geometry.setAttribute(
-      'position',
-      new THREE.BufferAttribute(topPositions, 3)
-    )
+    })
   })
 
   return (
@@ -126,10 +124,6 @@ export default function FrequencyField({ audioRef }) {
       {lineMeshes.map((line, i) => (
         <primitive object={line} key={i} />
       ))}
-      <line ref={topLine}>
-        <bufferGeometry />
-        <lineBasicMaterial color="black" transparent opacity={0.4} />
-      </line>
     </group>
   )
 }
