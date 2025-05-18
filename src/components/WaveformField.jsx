@@ -8,7 +8,7 @@ const POINTS_PER_LINE = 64
 const WIDTH           = 12
 const VERTICAL_SCALE  = 4
 const BASE_AMPLITUDE  = 0.3
-const MIN_AMPLITUDE   = 0.05  // Aggiungiamo un'ampiezza minima per garantire visibilità
+const MIN_AMPLITUDE   = 0.05  // Ampiezza minima per garantire visibilità
 
 const freqBands = [
   [20,25],[25,31],[31,39],[39,50],[50,63],[63,78],[78,100],[100,125],
@@ -25,6 +25,7 @@ export default function WaveformField({
   fftSize     = 2048
 }) {
   const lineRefs = useRef([])
+  const hasAudioRef = useRef(false)
 
   const hzToBin = hz => Math.floor(hz / (sampleRate / fftSize))
 
@@ -45,12 +46,47 @@ export default function WaveformField({
     return Math.max(avg / 255, MIN_AMPLITUDE / BASE_AMPLITUDE)  // Garantiamo un valore minimo
   }
 
+  function checkIfAudioIsPlaying(data) {
+    // Verifica se c'è audio in riproduzione controllando se ci sono valori significativi nell'array di dati
+    const threshold = 5; // Soglia per considerare l'audio attivo
+    const significantValues = data.filter(value => value > threshold);
+    return significantValues.length > 0;
+  }
+
   useFrame(({ clock }) => {
     if (!analyserRef.current || !dataArrayRef.current) return
     analyserRef.current.getByteFrequencyData(dataArrayRef.current)
     const data = dataArrayRef.current
     const t    = clock.getElapsedTime()
+    
+    // Verifica se c'è audio in riproduzione
+    hasAudioRef.current = checkIfAudioIsPlaying(data);
+    
+    // Se non c'è audio, mantieni le linee nella posizione base senza animazione
+    if (!hasAudioRef.current) {
+      for (let i = 0; i < NUM_LINES; i++) {
+        const line = lineRefs.current[i]
+        if (!line) continue
 
+        const arr = line.geometry.attributes.position.array
+        const tt = (i + 0.5) / NUM_LINES
+        const yOffset = (tt * 2 - 1) * VERTICAL_SCALE
+
+        for (let j = 0; j < POINTS_PER_LINE; j++) {
+          const x = (j / (POINTS_PER_LINE - 1)) * WIDTH - WIDTH / 2
+          const y = yOffset // Linea piatta quando non c'è audio
+          const idx = j * 3
+          arr[idx + 0] = x
+          arr[idx + 1] = y
+          arr[idx + 2] = 0
+        }
+
+        line.geometry.attributes.position.needsUpdate = true
+      }
+      return;
+    }
+    
+    // Se c'è audio, anima le linee in base alle frequenze
     for (let i = 0; i < NUM_LINES; i++) {
       const line = lineRefs.current[i]
       if (!line) continue
