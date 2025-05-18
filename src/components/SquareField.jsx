@@ -4,20 +4,22 @@ import { useFrame } from '@react-three/fiber'
 import * as THREE from 'three'
 
 // Configurazione della griglia
-const MIN_GRID_SIZE = 10 // Dimensione minima della griglia (senza audio)
-const MAX_GRID_SIZE = 40 // Dimensione massima della griglia (con audio al massimo)
+const MIN_GRID_SIZE = 32 // Dimensione minima della griglia (senza audio)
+const MAX_GRID_SIZE = 128 // Dimensione massima della griglia (con audio al massimo)
 const SQUARE_SIZE = 0.5 // Dimensione base dei quadrati
 const AUDIO_THRESHOLD = 10 // Soglia per considerare l'audio attivo
-const FEEDBACK_DECAY = 0.97 // Fattore di decadimento per l'effetto feedback (aumentato per rallentare ulteriormente)
-const GRID_CHANGE_SPEED = 0.03 // Velocità di cambiamento della griglia (ridotta per rallentare ulteriormente)
-const PATTERN_CHANGE_THRESHOLD = 0.25 // Soglia per il cambiamento del pattern (ridotta per cambiamenti più frequenti)
-const COLOR_TRANSITION_SPEED = 0.03 // Velocità di transizione dei colori (ridotta per transizioni più fluide)
+const FEEDBACK_DECAY = 0.92 // Aumentato per un decadimento più lento
+const GRID_CHANGE_SPEED = 0.05 // Velocità di cambiamento della griglia (ridotta per rallentare ulteriormente)
+const PATTERN_CHANGE_THRESHOLD = 0.05 // Soglia per il cambiamento del pattern (ridotta per cambiamenti più frequenti)
+const COLOR_TRANSITION_SPEED = 0.05 // Leggermente aumentato per transizioni più reattive
+const PATTERN_MEMORY_LENGTH = 15 // Numero di pattern da ricordare
+const EDGE_ENHANCEMENT = 0.2 // Fattore di enfatizzazione dei bordi
 
-// Colori
-const LOW_COLOR = new THREE.Color('#00bcd4') // Ciano per bassa intensità
-const MID_COLOR = new THREE.Color('#9c27b0') // Viola per media intensità
-const HIGH_COLOR = new THREE.Color('#ff1744') // Rosa/Rosso per alta intensità
-const STATIC_COLOR = new THREE.Color('#444444') // Grigio quando non c'è audio
+// Colori in scala di grigi
+const STATIC_COLOR = new THREE.Color('#333333'); // Grigio scuro quando non c'è audio
+const LOW_COLOR = new THREE.Color('#555555');    // Grigio medio-scuro
+const MID_COLOR = new THREE.Color('#888888');    // Grigio medio
+const HIGH_COLOR = new THREE.Color('#cccccc');   // Grigio chiaro (non bianco puro)
 
 // Classe per generare rumore Perlin
 class NoiseGenerator {
@@ -127,114 +129,100 @@ class NoiseGenerator {
   }
 }
 
-// Pattern generatori
+// Pattern generatori - modificati per la nuova mappatura frequenze-ampiezza
 const patterns = {
-  // Pattern a cerchi concentrici
-  circles: (x, y, time, noise, freqBands) => {
-    const distance = Math.sqrt(x * x + y * y);
-    // Usa le bande di frequenza basse per modulare i cerchi
-    const bassModulation = freqBands[0] * 2;
-    return Math.sin(distance * (3 + bassModulation) - time) * 0.5 + 0.5;
+  // Pattern a linee di frequenza
+  frequencyLines: (x, y, time, noise, freqBands, freqX, ampY) => {
+    // Usa la posizione X come indice di frequenza e Y come ampiezza
+    const freqValue = freqBands[freqX] || 0;
+    
+    // Crea linee orizzontali basate sull'ampiezza
+    const lineThreshold = 0.1;
+    const lineWidth = 0.05 + freqValue * 0.1;
+    
+    // Se l'ampiezza della frequenza è maggiore della posizione Y, mostra il quadrato
+    return ampY <= freqValue ? 1.0 : 0.0;
   },
   
-  // Pattern a spirale
-  spiral: (x, y, time, noise, freqBands) => {
-    const angle = Math.atan2(y, x);
-    const distance = Math.sqrt(x * x + y * y);
-    // Usa le bande di frequenza medie per modulare la spirale
-    const midModulation = freqBands[Math.floor(freqBands.length / 2)] * 3;
-    return Math.sin(distance * 5 + angle * (3 + midModulation) + time) * 0.5 + 0.5;
+  // Pattern a spettrogramma
+  spectrogram: (x, y, time, noise, freqBands, freqX, ampY) => {
+    // Usa la posizione X come indice di frequenza
+    const freqValue = freqBands[freqX] || 0;
+    
+    // Crea un effetto di persistenza temporale
+    const persistenceFactor = Math.max(0, 1 - (y / 1.0)); // Diminuisce con l'aumentare di Y
+    
+    // Combina il valore di frequenza con la persistenza
+    return freqValue * persistenceFactor;
   },
   
-  // Pattern a onde
-  waves: (x, y, time, noise, freqBands) => {
-    // Usa le bande di frequenza alte per modulare le onde
-    const highModulation = freqBands[freqBands.length - 1] * 3;
-    return Math.sin(x * (3 + highModulation) + time) * Math.cos(y * 2 - time * 0.5) * 0.5 + 0.5;
+  // Pattern a contorni di frequenza
+  frequencyContours: (x, y, time, noise, freqBands, freqX, ampY) => {
+    // Ottieni il valore della frequenza corrente e delle frequenze adiacenti
+    const freqValue = freqBands[freqX] || 0;
+    const freqLeft = freqBands[Math.max(0, freqX - 1)] || 0;
+    const freqRight = freqBands[Math.min(freqBands.length - 1, freqX + 1)] || 0;
+    
+    // Calcola il gradiente di frequenza
+    const freqGradient = Math.abs(freqRight - freqLeft);
+    
+    // Crea contorni basati sul gradiente e sull'ampiezza
+    const contourValue = Math.abs(ampY - freqValue);
+    const lineWidth = 0.05 + freqGradient * 0.2;
+    
+    return contourValue < lineWidth ? 1.0 : 0.0;
   },
   
-  // Pattern a scacchiera pulsante
-  checkerboard: (x, y, time, noise, freqBands) => {
-    // Usa l'intensità media per modulare la scala
-    const avgIntensity = freqBands.reduce((sum, val) => sum + val, 0) / freqBands.length;
-    const scale = 0.5 + Math.sin(time * 0.2) * 0.2 + avgIntensity * 0.3;
-    return ((Math.floor(x / scale) + Math.floor(y / scale)) % 2) ? 1 : 0;
+  // Pattern a onde di frequenza
+  frequencyWaves: (x, y, time, noise, freqBands, freqX, ampY) => {
+    // Usa la posizione X come indice di frequenza
+    const freqValue = freqBands[freqX] || 0;
+    
+    // Crea onde basate sul tempo e sul valore della frequenza
+    const wavePhase = time * 0.5 + freqX * 0.1;
+    const waveAmplitude = freqValue * 0.5;
+    const waveValue = Math.sin(wavePhase) * waveAmplitude;
+    
+    // Confronta con la posizione Y
+    const distanceFromWave = Math.abs(ampY - (0.5 + waveValue));
+    const lineWidth = 0.05 + freqValue * 0.1;
+    
+    return distanceFromWave < lineWidth ? 1.0 : 0.0;
   },
   
-  // Pattern di rumore Perlin modulato
-  perlinNoise: (x, y, time, noise, freqBands) => {
-    // Usa le bande di frequenza per modulare il rumore
-    const bassInfluence = freqBands[0] * 0.5;
-    const midInfluence = freqBands[Math.floor(freqBands.length / 2)] * 0.3;
-    const highInfluence = freqBands[freqBands.length - 1] * 0.2;
+  // Pattern a matrice di frequenza
+  frequencyMatrix: (x, y, time, noise, freqBands, freqX, ampY) => {
+    // Usa la posizione X come indice di frequenza
+    const freqValue = freqBands[freqX] || 0;
     
-    return noise.noise(
-      x + bassInfluence, 
-      y + midInfluence, 
-      time + highInfluence
-    ) * 0.5 + 0.5;
+    // Crea una matrice di punti basata su frequenza e tempo
+    const gridSize = 0.1 + freqValue * 0.2;
+    const gridX = Math.floor(x / gridSize);
+    const gridY = Math.floor(y / gridSize);
+    
+    // Alterna i punti in base alla parità della somma delle coordinate
+    const isVisible = (gridX + gridY) % 2 === 0;
+    
+    // Modula la visibilità in base all'ampiezza
+    return isVisible && ampY <= freqValue ? 1.0 : 0.0;
   },
   
-  // Pattern di rumore fBm con modulazione audio
-  fbmNoise: (x, y, time, noise, freqBands) => {
-    // Usa l'intensità media per modulare il rumore
-    const avgIntensity = freqBands.reduce((sum, val) => sum + val, 0) / freqBands.length;
-    const octaves = 3 + Math.floor(avgIntensity * 3); // 3-6 ottave
+  // Pattern a flusso di frequenza
+  frequencyFlow: (x, y, time, noise, freqBands, freqX, ampY) => {
+    // Usa la posizione X come indice di frequenza
+    const freqValue = freqBands[freqX] || 0;
     
-    return noise.fbm(x, y, time, octaves, 2.0, 0.5) * 0.5 + 0.5;
-  },
-  
-  // Pattern a vortice reattivo
-  vortex: (x, y, time, noise, freqBands) => {
-    const angle = Math.atan2(y, x);
-    const distance = Math.sqrt(x * x + y * y);
+    // Crea un campo di flusso basato sul rumore e modulato dalla frequenza
+    const flowScale = 2.0 + freqValue * 3.0;
+    const flowTime = time * 0.1;
     
-    // Usa diverse bande di frequenza per modulare il vortice
-    const bassInfluence = freqBands[0] * 3;
-    const midInfluence = freqBands[Math.floor(freqBands.length / 2)] * 5;
+    // Campiona il rumore nella posizione corrente
+    const noiseValue = noise.noise(x * flowScale, y * flowScale, flowTime);
     
-    return Math.sin(distance * (3 + bassInfluence) - angle * (5 + midInfluence) + time) * 0.5 + 0.5;
-  },
-  
-  // Pattern a righe pulsanti
-  stripes: (x, y, time, noise, freqBands) => {
-    // Usa le bande di frequenza per modulare le righe
-    const bassInfluence = freqBands[0] * 5;
-    const midInfluence = freqBands[Math.floor(freqBands.length / 2)] * 3;
+    // Modula il rumore in base all'ampiezza e al valore della frequenza
+    const threshold = 0.4 + freqValue * 0.3;
     
-    const freq = 5 + Math.sin(time * 0.1) * 2 + bassInfluence;
-    const phase = time + midInfluence;
-    
-    return Math.sin(x * freq + phase) * 0.5 + 0.5;
-  },
-  
-  // Pattern a griglia pulsante
-  grid: (x, y, time, noise, freqBands) => {
-    // Usa le bande di frequenza per modulare la griglia
-    const bassInfluence = freqBands[0] * 3;
-    const highInfluence = freqBands[freqBands.length - 1] * 3;
-    
-    const xGrid = Math.sin(x * (10 + bassInfluence) + time) * 0.5 + 0.5;
-    const yGrid = Math.sin(y * (10 + highInfluence) - time * 0.5) * 0.5 + 0.5;
-    
-    return Math.max(xGrid, yGrid);
-  },
-  
-  // Pattern a mandala
-  mandala: (x, y, time, noise, freqBands) => {
-    const angle = Math.atan2(y, x);
-    const distance = Math.sqrt(x * x + y * y);
-    
-    // Usa diverse bande di frequenza per modulare il mandala
-    const bassInfluence = freqBands[0] * 2;
-    const midInfluence = freqBands[Math.floor(freqBands.length / 2)] * 3;
-    const highInfluence = freqBands[freqBands.length - 1] * 4;
-    
-    const petals = 8 + Math.floor(midInfluence * 8); // 8-16 petali
-    const radialWaves = Math.sin(angle * petals) * 0.5 + 0.5;
-    const concentricWaves = Math.sin(distance * (5 + bassInfluence) - time) * 0.5 + 0.5;
-    
-    return (radialWaves * 0.7 + concentricWaves * 0.3) * (1 + highInfluence * 0.5);
+    return noiseValue > threshold && ampY <= freqValue * 1.2 ? 1.0 : 0.0;
   }
 };
 
@@ -256,12 +244,14 @@ export default function SquareField({
   const prevIntensitiesRef = useRef([]);
   const prevColorsRef = useRef([]);
   const targetGridSizeRef = useRef(MIN_GRID_SIZE);
-  const currentPatternRef = useRef('perlinNoise');
+  const currentPatternRef = useRef('frequencyLines');
   const noiseRef = useRef(new NoiseGenerator(Math.random()));
   const lastPatternChangeRef = useRef(0);
   const currentGridSizeRef = useRef(MIN_GRID_SIZE);
   const lastIntensityRef = useRef(0);
   const patternHistoryRef = useRef([]);
+  const prevPatternValuesRef = useRef([]); // Per il sistema di memoria
+  const freqBandsHistoryRef = useRef([]); // Per memorizzare la storia delle bande di frequenza
   
   // Funzione per verificare se c'è audio in riproduzione
   function checkIfAudioIsPlaying(data) {
@@ -283,7 +273,7 @@ export default function SquareField({
   // Funzione per dividere i dati audio in bande di frequenza
   function getFrequencyBands(freqData) {
     const bands = [];
-    const bandCount = 32; // Numero di bande di frequenza
+    const bandCount = Math.min(MAX_GRID_SIZE, freqData.length / 2); // Limita il numero di bande alla dimensione della griglia
     
     // Calcola la dimensione di ogni banda
     const bandSize = Math.floor(freqData.length / bandCount);
@@ -316,18 +306,24 @@ export default function SquareField({
   
   // Funzione per interpolare il colore in base all'intensità
   function getColorForIntensity(intensity, patternValue) {
-    // Combina l'intensità con il valore del pattern per una colorazione più interessante
-    const combinedIntensity = intensity * 0.7 + patternValue * 0.3;
+    // Usa una funzione non lineare per enfatizzare i contrasti
+    const enhancedPattern = Math.pow(patternValue, 1.5); // Esponente > 1 aumenta il contrasto
     
-    if (combinedIntensity < 0.33) {
-      // Da grigio a ciano
-      return STATIC_COLOR.clone().lerp(LOW_COLOR, combinedIntensity * 3);
-    } else if (combinedIntensity < 0.66) {
-      // Da ciano a viola
-      return LOW_COLOR.clone().lerp(MID_COLOR, (combinedIntensity - 0.33) * 3);
+    // Combina l'intensità con il valore del pattern con più peso sul pattern
+    const combinedIntensity = intensity * 0.4 + enhancedPattern * 0.6;
+    
+    // Applica una curva sigmoidale per aumentare il contrasto
+    const contrastedIntensity = 1 / (1 + Math.exp(-10 * (combinedIntensity - 0.5)));
+    
+    if (contrastedIntensity < 0.33) {
+      // Da grigio scuro a grigio medio-scuro
+      return STATIC_COLOR.clone().lerp(LOW_COLOR, contrastedIntensity * 3);
+    } else if (contrastedIntensity < 0.66) {
+      // Da grigio medio-scuro a grigio medio
+      return LOW_COLOR.clone().lerp(MID_COLOR, (contrastedIntensity - 0.33) * 3);
     } else {
-      // Da viola a rosso
-      return MID_COLOR.clone().lerp(HIGH_COLOR, (combinedIntensity - 0.66) * 3);
+      // Da grigio medio a grigio chiaro
+      return MID_COLOR.clone().lerp(HIGH_COLOR, (contrastedIntensity - 0.66) * 3);
     }
   }
   
@@ -339,6 +335,12 @@ export default function SquareField({
     
     // Ottieni le bande di frequenza
     const freqBands = getFrequencyBands(freqData);
+    
+    // Aggiorna la storia delle bande di frequenza
+    if (freqBandsHistoryRef.current.length >= 10) {
+      freqBandsHistoryRef.current.shift();
+    }
+    freqBandsHistoryRef.current.push(freqBands);
     
     // Calcola l'intensità media complessiva
     const avgIntensity = isAudioPlaying ? getAverageIntensity(freqBands) : 0;
@@ -371,6 +373,7 @@ export default function SquareField({
       
       // Cambia pattern se l'intensità cambia significativamente
       if (intensityChange > PATTERN_CHANGE_THRESHOLD) {
+        // Definisci i pattern preferiti per la visualizzazione frequenze-ampiezza
         const patternKeys = Object.keys(patterns);
         
         // Evita di ripetere lo stesso pattern
@@ -447,24 +450,42 @@ export default function SquareField({
       // Imposta la scala in base alla dimensione del quadrato
       square.scale.set(separation * 0.9, separation * 0.9, 1);
       
-      // Determina l'intensità per questo quadrato
-      // Ogni riga (y) corrisponde a una banda di frequenza specifica
-      const freqIndex = Math.floor((iy / gridSize) * freqBands.length);
-      let intensity = isAudioPlaying ? freqBands[freqIndex] || 0 : 0;
-      
+      // NUOVA MAPPATURA: X = frequenza, Y = ampiezza
       // Normalizza le coordinate per il pattern
-      const nx = (ix / gridSize) * 2 - 1;
+      const nx = (ix / gridSize) * 2 - 1; // Coordinate normalizzate per il pattern
       const ny = (iy / gridSize) * 2 - 1;
+      
+      // Calcola l'indice di frequenza e il valore di ampiezza normalizzati
+      const freqIndex = Math.floor((ix / gridSize) * freqBands.length);
+      const ampValue = 1.0 - (iy / gridSize); // Inverti Y per avere 1.0 in basso e 0.0 in alto
       
       // Ottieni il valore del pattern
       let patternValue = 0;
+      let intensity = 0;
+      
       if (isAudioPlaying) {
-        // Passa anche le bande di frequenza al pattern per una maggiore reattività
-        patternValue = currentPattern(nx, ny, timeRef.current, noiseRef.current, freqBands);
+        // Usa la nuova mappatura per il pattern
+        patternValue = currentPattern(nx, ny, timeRef.current, noiseRef.current, freqBands, freqIndex, ampValue);
         
-        // Combina l'intensità della frequenza con il valore del pattern
-        intensity = intensity * 0.6 + patternValue * 0.4;
+        // Ottieni il valore della frequenza corrente
+        const freqValue = freqBands[freqIndex] || 0;
+        
+        // Calcola l'intensità basata sulla frequenza e sull'ampiezza
+        intensity = freqValue * (1.0 - Math.abs(ampValue - freqValue));
       }
+      
+      // Sistema di memoria per pattern più coerenti
+      if (!prevPatternValuesRef.current[i]) {
+        prevPatternValuesRef.current[i] = Array(PATTERN_MEMORY_LENGTH).fill(patternValue);
+      } else {
+        // Sposta tutti i valori e aggiungi quello nuovo
+        prevPatternValuesRef.current[i].shift();
+        prevPatternValuesRef.current[i].push(patternValue);
+      }
+      
+      // Calcola la media dei valori memorizzati per un effetto più fluido
+      const averagePatternValue = prevPatternValuesRef.current[i].reduce((sum, val) => sum + val, 0) / 
+                                prevPatternValuesRef.current[i].length;
       
       // Applica feedback per un effetto più fluido
       const prevIntensity = prevIntensitiesRef.current[i] || 0;
@@ -473,21 +494,21 @@ export default function SquareField({
       
       // Calcola il colore basato sull'intensità e sul pattern
       const targetColor = isAudioPlaying 
-        ? getColorForIntensity(newIntensity, patternValue)
+        ? getColorForIntensity(newIntensity, averagePatternValue)
         : STATIC_COLOR;
       
       // Applica feedback al colore
       const prevColor = prevColorsRef.current[i];
-      prevColor.lerp(targetColor, COLOR_TRANSITION_SPEED); // Transizioni più fluide
+      prevColor.lerp(targetColor, COLOR_TRANSITION_SPEED);
       square.material.color.copy(prevColor);
       
-      // Imposta l'opacità in base all'intensità
+      // Imposta l'opacità in base all'intensità e al pattern
       square.material.opacity = isAudioPlaying 
-        ? Math.max(0.3, Math.min(0.9, newIntensity + 0.3))
+        ? Math.max(0.3, Math.min(0.9, averagePatternValue + 0.3))
         : 0.7;
       
       // Imposta la posizione Z per un leggero effetto 3D
-      square.position.z = isAudioPlaying ? newIntensity * 2 : 0;
+      square.position.z = isAudioPlaying ? averagePatternValue * 2 : 0;
     }
   }
   
