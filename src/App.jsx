@@ -99,7 +99,8 @@ function App() {
             <div style={{ display: 'flex', gap: '0.5rem' }}>
               <button onClick={() => setVisualMode('frequency')}>🎛 Frequency</button>
               <button onClick={() => setVisualMode('particles')}>💥 Particles</button>
-              <button onClick={() => setVisualMode('waveform')}>🌊 Waveform</button> {/* ✅ NUOVO */}
+              <button onClick={() => setVisualMode('waveform')}>🌊 Waveform</button>
+              <button onClick={() => setVisualMode('square')}>🔲 Square</button>
             </div>
 
           </div>

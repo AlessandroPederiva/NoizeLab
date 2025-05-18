@@ -4,6 +4,7 @@ import { OrbitControls } from '@react-three/drei'
 import FrequencyField from './FrequencyField'
 import ParticleExplosion from './ParticleExplosion'
 import WaveformField from './WaveformField'
+import SquareField from './SquareField'
 
 export default function VisualizerSwitcher({ mode, analyserRef, dataArrayRef }) {
   return (
@@ -23,7 +24,11 @@ export default function VisualizerSwitcher({ mode, analyserRef, dataArrayRef }) 
         <WaveformField analyserRef={analyserRef} dataArrayRef={dataArrayRef} />
       )}
 
-      <OrbitControls enableZoom={true} enableRotate={false} autoRotate={false} />
+      {mode === 'square' && (
+        <SquareField analyserRef={analyserRef} dataArrayRef={dataArrayRef} />
+      )}
+
+      <OrbitControls enableZoom={true} enableRotate={true} autoRotate={false} />
     </Canvas>
   )
 }
