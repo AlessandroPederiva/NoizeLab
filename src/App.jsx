@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import VisualizerSwitcher from './components/VisualizerSwitcher'
+import LandingPage from './components/LandingPage'
 
 function App() {
   const [audioUrl, setAudioUrl] = useState(null)
@@ -62,15 +63,9 @@ function App() {
 
   return (
     <div style={{ height: '100vh', width: '100vw', background: 'black', overflow: 'hidden' }}>
-      {!audioUrl && (
-        <div style={{ position: 'absolute', zIndex: 10, color: 'white', padding: '2rem' }}>
-          <h1>NoizeLab</h1>
-          <p>Carica un file audio per iniziare</p>
-          <input type="file" accept="audio/*" onChange={handleAudioUpload} />
-        </div>
-      )}
-
-      {audioUrl && (
+      {!audioUrl ? (
+        <LandingPage onFileUpload={handleAudioUpload} />
+      ) : (
         <>
           <audio
             ref={audioRef}
@@ -102,7 +97,6 @@ function App() {
               <button onClick={() => setVisualMode('waveform')}>🌊 Waveform</button>
               <button onClick={() => setVisualMode('square')}>🔲 Square</button>
             </div>
-
           </div>
 
           <VisualizerSwitcher
