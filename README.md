@@ -6,6 +6,7 @@ npm install
 
 npm run dev
 
+wasd for movement
 
 ## Anteprime del visualizer
 
